@@ -1,4 +1,4 @@
-// token-radar-01 entry — model radar-2 (category-calibrated peer multiples + chain diversity).
+// token-radar-01 entry — model radar-2.1 (dynamic category-calibrated peer multiples + chain diversity).
 //
 // Run locally:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input input/snapshot.json

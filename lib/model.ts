@@ -17,10 +17,10 @@ export type { BoardRow, FarmStep, LiveRow, ModelConstants, RadarData, RadarRow, 
 export { boardIssue, parseSnapshot } from './types.ts';
 
 /** Model version shown in the dashboard and dossier. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-2.1';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
-export const EARLY_ROWS = 180;
+export const EARLY_ROWS = 220;
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -77,6 +77,39 @@ const GLOBAL_MULTIPLE = 0.250;
 /** Cap on the TVL multiple before log-transform to avoid extreme outliers. */
 const MULTIPLE_CAP = 20.0;
 
+const EXCLUDED_COMP_CATEGORIES = new Set(['CEX', 'Bridge', 'Liquid Staking', 'Liquid Restaking']);
+
+/** Median of a non-empty sorted or unsorted numeric array. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * Dynamically fit category peer multiples (median mcap/tvl) from the snapshot's
+ * own live-token protocols, falling back to calibrated priors when a category
+ * has fewer than 2 live comparables.
+ */
+function fitCategoryMultiples(protocols: SnapshotProtocol[]): Map<string, number> {
+  const byCat = new Map<string, number[]>();
+  for (const p of protocols) {
+    if (!p.category || EXCLUDED_COMP_CATEGORIES.has(p.category)) continue;
+    if (p.mcap_usd === null || p.mcap_usd <= 0 || p.tvl_usd <= 1_000_000) continue;
+    const mult = Math.min(50, p.mcap_usd / p.tvl_usd);
+    const list = byCat.get(p.category) ?? [];
+    list.push(mult);
+    byCat.set(p.category, list);
+  }
+  const fitted = new Map<string, number>(Object.entries(CATEGORY_MULTIPLE));
+  for (const [cat, vals] of byCat) {
+    if (vals.length >= 2) {
+      fitted.set(cat, round4(median(vals)));
+    }
+  }
+  return fitted;
+}
+
 /** Chain diversity multipliers: 1 chain → 1.0, 3+ → 1.15, 5+ → 1.25, 8+ → 1.35. */
 function chainDiversityMult(chains: string[]): number {
   const n = chains.length;
@@ -112,7 +145,7 @@ function maturityMult(age: number | null): number {
 }
 
 /** The implied market cap for a pre-token protocol. */
-function computeImplied(p: SnapshotProtocol, asOf: string): {
+function computeImplied(p: SnapshotProtocol, asOf: string, multiples: Map<string, number>): {
   implied: number;
   peerMultiple: number;
   growthMultiplier: number;
@@ -121,7 +154,7 @@ function computeImplied(p: SnapshotProtocol, asOf: string): {
   age: number | null;
 } {
   const age = ageDays(asOf, p.listed_at);
-  const rawMult = CATEGORY_MULTIPLE[p.category ?? ''] ?? GLOBAL_MULTIPLE;
+  const rawMult = multiples.get(p.category ?? '') ?? GLOBAL_MULTIPLE;
   const peerMultiple = Math.min(rawMult, MULTIPLE_CAP);
   const gMult = growthMult(p.change_7d);
   const mMult = maturityMult(age);
@@ -208,12 +241,16 @@ export function farmPlan(p: SnapshotProtocol, age: number | null): string[] {
   const capital = capitalFor(p.tvl_usd);
   const hold = holdDays(age);
   const chain = p.chains[0] ?? 'its main chain';
+  const secondaryChain = p.chains[1];
   const name = p.name;
+  const multiChainNote = secondaryChain
+    ? ` Rotate part of your weekly activity onto ${secondaryChain} as well to qualify for multi-chain criteria.`
+    : '';
 
   return [
     `Set up a fresh wallet dedicated to this farm; fund it only with the capital you plan to deploy, and store its seed phrase offline before you interact with ${name}. Cost: under $5 of native gas. Time: 10 minutes.`,
     primaryAction(p, capital) + ` Cost: $${capital} of capital plus up to $${capital >= 150 ? 15 : 6} of gas. Time: 15–30 minutes.`,
-    `Perform one on-chain interaction per week—a deposit top-up, a swap, a borrow or a governance vote—to remain active across multiple weekly snapshots and maximise your user-weight score. Cost: $2–$5 of gas per week. Time: 10 minutes per week.`,
+    `Perform one on-chain interaction per week—a deposit top-up, a swap, a borrow or a governance vote—to remain active across multiple weekly snapshots and maximise your user-weight score.${multiChainNote} Cost: $2–$5 of gas per week. Time: 10 minutes per week.`,
     `Hold your position for at least ${hold} days so it appears in at least ${Math.ceil(hold / 7)} weekly snapshots; withdrawing early risks disqualification from a snapshot-weighted airdrop. Cost: $${capital} locked. Time: ${hold} days.`,
     `Follow ${name}'s official Twitter and Discord; enable notifications for any points-portal or snapshot announcement so you can supply any additional information within 24 hours of an airdrop-eligibility campaign. Cost: free. Time: 5 minutes to set up.`,
     `Before the token launch, check ${name}'s official site for an airdrop checker; claim only from the URL the protocol publishes—never from a third-party link. Record each transaction hash for any future support request. Cost: gas only, typically under $3. Time: 15 minutes.`,
@@ -256,9 +293,10 @@ export function buildBoard(snapshot: Snapshot): BoardRow[] {
     .slice(0, EARLY_ROWS);
   for (const p of early) chosen.set(p.slug, p);
 
+  const multiples = fitCategoryMultiples(snapshot.protocols);
   const scored = [...chosen.values()].map((p) => {
     const { implied, peerMultiple, growthMultiplier, maturityMultiplier, chainMultiplier, age } =
-      computeImplied(p, snapshot.as_of);
+      computeImplied(p, snapshot.as_of, multiples);
     return { p, implied, peerMultiple, growthMultiplier, maturityMultiplier, chainMultiplier, age };
   });
 
