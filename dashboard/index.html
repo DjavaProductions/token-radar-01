@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Token Launch Radar — model radar-2</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <circle cx="14" cy="14" r="13" stroke="#6366f1" stroke-width="2"/>
+          <circle cx="14" cy="14" r="8" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <circle cx="14" cy="14" r="3" fill="#6366f1"/>
+          <circle cx="21" cy="8" r="2" fill="#f59e0b"/>
+        </svg>
+        <span class="header-title">Token Launch Radar</span>
+        <span class="header-badge">radar-2</span>
+      </div>
+      <div class="header-meta" id="header-meta">Loading…</div>
+    </div>
+  </header>
+
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-view="board">📊 Board</button>
+    <button class="tab-btn" data-view="live">💹 Live Tokens</button>
+    <button class="tab-btn" data-view="about">ℹ️ Methodology</button>
+  </nav>
+
+  <!-- BOARD VIEW -->
+  <section id="view-board" class="view active">
+    <div class="toolbar">
+      <div class="filter-group">
+        <input id="search" type="search" placeholder="Search protocol…" autocomplete="off" />
+        <select id="filter-category">
+          <option value="">All categories</option>
+        </select>
+        <select id="filter-chain">
+          <option value="">All chains</option>
+        </select>
+        <label class="filter-toggle">
+          <input type="checkbox" id="filter-watchlist" />
+          Watchlist only
+        </label>
+      </div>
+      <div class="sort-group">
+        <label>Sort:
+          <select id="sort-col">
+            <option value="implied_value_usd">Implied Value</option>
+            <option value="tvl_usd">TVL</option>
+            <option value="change_7d">7d Change</option>
+            <option value="age_days">Age</option>
+            <option value="rank">Rank</option>
+          </select>
+        </label>
+        <button id="sort-dir" class="sort-dir-btn" title="Toggle sort direction">↓ Desc</button>
+      </div>
+    </div>
+    <div class="stat-bar" id="stat-bar"></div>
+    <div class="table-wrap">
+      <table id="board-table">
+        <thead>
+          <tr>
+            <th class="col-rank">#</th>
+            <th class="col-name">Protocol</th>
+            <th class="col-cat">Category</th>
+            <th class="col-chains">Chains</th>
+            <th class="col-tvl sortable" data-col="tvl_usd">TVL ▾</th>
+            <th class="col-change sortable" data-col="change_7d">7d%</th>
+            <th class="col-implied sortable active" data-col="implied_value_usd">Implied Value ▾</th>
+            <th class="col-action"></th>
+          </tr>
+        </thead>
+        <tbody id="board-body"></tbody>
+      </table>
+    </div>
+    <div id="detail-panel" class="detail-panel hidden"></div>
+  </section>
+
+  <!-- LIVE VIEW -->
+  <section id="view-live" class="view">
+    <div class="live-intro">
+      <p>These protocols already have a live token. Their market caps are real prices, not model estimates — they anchor the category multiples the board uses for pre-token protocols.</p>
+    </div>
+    <div class="table-wrap">
+      <table id="live-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Protocol</th>
+            <th>Category</th>
+            <th>TVL</th>
+            <th>Market Cap</th>
+            <th>MCap/TVL</th>
+            <th>7d%</th>
+          </tr>
+        </thead>
+        <tbody id="live-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ABOUT VIEW -->
+  <section id="view-about" class="view">
+    <article class="about-article">
+      <h2>Methodology — model radar-2</h2>
+      <p>This radar ranks every pre-token DeFi protocol by the implied market cap the market would assign it at token launch, using only the sealed DefiLlama snapshot. The model has four factors:</p>
+
+      <h3>1. Category peer multiple</h3>
+      <p>For each category in the snapshot, we compute the <strong>median(mcap / TVL)</strong> across all live-token protocols in that category (excluding CEX, bridges, liquid staking, and protocols with negative or zero mcap). This gives a data-driven multiple anchored in what the market actually pays per TVL dollar in each sector — rather than a single flat multiple for all protocols.</p>
+      <table class="about-table" id="about-multiples"></table>
+
+      <h3>2. Chain diversity factor</h3>
+      <p>Protocols deployed on more chains are more likely to have a broad user base. We apply a multiplier based on the number of chains:</p>
+      <ul>
+        <li>1–2 chains → ×1.00 (no bonus)</li>
+        <li>3–4 chains → ×1.15</li>
+        <li>5–7 chains → ×1.25</li>
+        <li>8+ chains → ×1.35</li>
+      </ul>
+
+      <h3>3. Growth signal (7-day TVL change)</h3>
+      <p>A positive 7-day TVL growth indicates rising demand. We clamp the change to [−60%, +120%] and apply a weight of 0.40, giving a growth multiplier of <code>1 + (clamped_change / 100) × 0.40</code>.</p>
+
+      <h3>4. Maturity curve</h3>
+      <p>Older protocols have had more time to build user trust and liquidity. The maturity multiplier rises from 0.60 (brand new) to 1.00 at ≥ 3 years old: <code>0.60 + min(age_days, 1095) / 1095 × 0.40</code>.</p>
+
+      <h3>Implied value formula</h3>
+      <pre class="formula">implied = max(1, round(
+  tvl_usd
+  × peer_multiple(category)
+  × chain_diversity_mult(chains)
+  × growth_mult(change_7d)
+  × maturity_mult(age_days)
+))</pre>
+
+      <h3>Farm plans</h3>
+      <p>Each protocol gets a 7-step farm plan derived from its category, TVL tier, age, and primary chain. The plan tells you: how much capital to deploy, the primary on-chain action to register as an active user, how often to interact, how long to hold, and how to claim — all without relying on any information outside the sealed snapshot.</p>
+
+      <h3>Board coverage</h3>
+      <p>The board always covers every watchlist slug (40 protocols at or above $50M TVL with no token). It also includes the top <strong id="about-early-count">180</strong> pre-token protocols below the floor, ranked by TVL — the early radar finds value before it reaches the floor.</p>
+    </article>
+  </section>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
